@@ -1,4 +1,4 @@
-name: Paperclip → Actions 자동 디스패치
+name: Paperclip → Actions 중앙 디스패치
 
 on:
   schedule:
@@ -13,10 +13,11 @@ jobs:
       contents: read
 
     steps:
-      - name: Paperclip 대기 이슈 확인 및 디스패치
+      - name: Paperclip 대기 이슈 확인 및 대상 레포로 디스패치
         env:
           PAPERCLIP_URL: https://paperclip-production-7ed4.up.railway.app
           GH_TOKEN: ${{ secrets.GLOBAL_SETTINGS_TOKEN }}
+          OWNER: hs85-newbie
         run: |
           # Paperclip에서 todo 상태 이슈 조회
           ISSUES=$(curl -sf "${PAPERCLIP_URL}/api/v1/issues?status=todo" \
@@ -27,18 +28,30 @@ jobs:
             exit 0
           fi
 
-          echo "대기 이슈 발견 — repository_dispatch 트리거"
+          echo "대기 이슈 발견 — 대상 레포별 디스패치"
 
-          # 각 이슈에 대해 dispatch
+          # 이슈 제목에서 [레포명] 태그 추출하여 대상 레포로 dispatch
+          # 형식: [tms] 인증 시스템 구현 → hs85-newbie/tms 로 dispatch
+          # 태그 없으면 my-claude-global로 fallback
           echo "$ISSUES" | jq -r '.[] | @base64' 2>/dev/null | while read encoded; do
             TITLE=$(echo "$encoded" | base64 -d | jq -r '.title')
             ID=$(echo "$encoded" | base64 -d | jq -r '.identifier')
 
-            echo "디스패치: $ID - $TITLE"
+            # [레포명] 패턴 추출
+            if echo "$TITLE" | grep -qP '^\[.+?\]'; then
+              REPO=$(echo "$TITLE" | grep -oP '^\[\K[^\]]+')
+              TASK=$(echo "$TITLE" | sed 's/^\[[^]]*\]\s*//')
+            else
+              REPO="my-claude-global"
+              TASK="$TITLE"
+            fi
 
-            gh api repos/hs85-newbie/my-claude-global/dispatches \
+            TARGET="${OWNER}/${REPO}"
+            echo "디스패치: $ID → $TARGET — $TASK"
+
+            gh api "repos/${TARGET}/dispatches" \
               -f event_type=claude-task \
-              -f "client_payload[task]=${TITLE}" \
+              -f "client_payload[task]=${TASK}" \
               -f "client_payload[issue_id]=${ID}" \
-              -f "client_payload[max_turns]=20" || true
+              -f "client_payload[max_turns]=20" || echo "⚠️ ${TARGET} dispatch 실패 (레포 확인 필요)"
           done
