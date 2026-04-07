@@ -1,0 +1,58 @@
+name: Claude Code (수동 실행)
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Claude에게 시킬 작업"
+        required: true
+        type: string
+      max_turns:
+        description: "최대 실행 횟수 (기본: 20)"
+        default: "20"
+        type: string
+
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: hs85-newbie/my-claude-global
+          path: .claude-global
+          token: ${{ secrets.GLOBAL_SETTINGS_TOKEN }}
+      - run: |
+          mkdir -p ~/.claude/skills
+          cp .claude-global/CLAUDE.md ~/.claude/CLAUDE.md
+          cp -r .claude-global/skills/* ~/.claude/skills/ 2>/dev/null || true
+      - uses: actions/cache@v4
+        with:
+          path: ~/gstack
+          key: gstack-v1-${{ runner.os }}
+      - name: gstack 설치 (캐시 미스 시)
+        run: |
+          if [ ! -f ~/gstack/setup ]; then
+            git clone https://github.com/garrytan/gstack.git ~/gstack
+          fi
+          cd ~/gstack && ./setup --host claude
+      - uses: actions/cache@v4
+        with:
+          path: ~/.openspace
+          key: openspace-${{ github.repository }}-${{ github.run_id }}
+          restore-keys: openspace-${{ github.repository }}-
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ inputs.task }}
+          claude_args: "--max-turns ${{ inputs.max_turns }}"
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ~/.openspace
+          key: openspace-${{ github.repository }}-${{ github.run_id }}
