@@ -3,20 +3,21 @@ name: CI 품질 게이트
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - '.github/dependabot.yml'
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'tsconfig.json'
   push:
     branches: [main]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - '.github/dependabot.yml'
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'tsconfig.json'
 
 jobs:
   quality-gate:
-    if: hashFiles('package.json') != ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
