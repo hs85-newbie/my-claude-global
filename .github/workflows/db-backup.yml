@@ -1,0 +1,43 @@
+name: OpenSpace DB 주간 백업
+
+on:
+  schedule:
+    - cron: '0 15 * * 0'  # UTC 15:00 일요일 = KST 월요일 00:00
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: OpenSpace DB 캐시 복원
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.openspace
+          key: openspace-${{ github.repository }}-
+          restore-keys: openspace-${{ github.repository }}-
+
+      - name: 백업 생성
+        run: |
+          if [ -f ~/.openspace/openspace.db ]; then
+            mkdir -p backups
+            cp ~/.openspace/openspace.db "backups/openspace-$(date +%Y%m%d).db"
+            echo "BACKUP_CREATED=true" >> $GITHUB_ENV
+            echo "백업 생성: backups/openspace-$(date +%Y%m%d).db"
+          else
+            echo "OpenSpace DB 없음 — 백업 건너뜀"
+            echo "BACKUP_CREATED=false" >> $GITHUB_ENV
+          fi
+
+      - name: 백업 업로드 (Artifact)
+        if: env.BACKUP_CREATED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openspace-db-backup-${{ github.run_id }}
+          path: backups/
+          retention-days: 90
