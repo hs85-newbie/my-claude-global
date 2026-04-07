@@ -1,0 +1,44 @@
+name: Paperclip → Actions 자동 디스패치
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # 30분마다 실행
+  workflow_dispatch:
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Paperclip 대기 이슈 확인 및 디스패치
+        env:
+          PAPERCLIP_URL: https://paperclip-production-7ed4.up.railway.app
+          GH_TOKEN: ${{ secrets.GLOBAL_SETTINGS_TOKEN }}
+        run: |
+          # Paperclip에서 todo 상태 이슈 조회
+          ISSUES=$(curl -sf "${PAPERCLIP_URL}/api/v1/issues?status=todo" \
+            -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null || echo "[]")
+
+          if [ "$ISSUES" = "[]" ] || [ -z "$ISSUES" ]; then
+            echo "대기 중인 이슈 없음 — 스킵"
+            exit 0
+          fi
+
+          echo "대기 이슈 발견 — repository_dispatch 트리거"
+
+          # 각 이슈에 대해 dispatch
+          echo "$ISSUES" | jq -r '.[] | @base64' 2>/dev/null | while read encoded; do
+            TITLE=$(echo "$encoded" | base64 -d | jq -r '.title')
+            ID=$(echo "$encoded" | base64 -d | jq -r '.identifier')
+
+            echo "디스패치: $ID - $TITLE"
+
+            gh api repos/hs85-newbie/my-claude-global/dispatches \
+              -f event_type=claude-task \
+              -f "client_payload[task]=${TITLE}" \
+              -f "client_payload[issue_id]=${ID}" \
+              -f "client_payload[max_turns]=20" || true
+          done
