@@ -11,6 +11,8 @@ on:
         description: "최대 실행 횟수 (기본: 20)"
         default: "20"
         type: string
+  repository_dispatch:
+    types: [claude-task]
 
 jobs:
   claude:
@@ -53,8 +55,8 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: ${{ inputs.task }}
-          claude_args: "--max-turns ${{ inputs.max_turns }}"
+          prompt: ${{ inputs.task || github.event.client_payload.task }}
+          claude_args: "--max-turns ${{ inputs.max_turns || github.event.client_payload.max_turns || '20' }}"
       - uses: actions/cache/save@v4
         if: always()
         with:
