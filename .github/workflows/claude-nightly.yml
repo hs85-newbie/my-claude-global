@@ -25,6 +25,10 @@ jobs:
           mkdir -p ~/.claude/skills
           cp .claude-global/CLAUDE.md ~/.claude/CLAUDE.md
           cp -r .claude-global/skills/* ~/.claude/skills/ 2>/dev/null || true
+      - name: Bun 설치
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - uses: actions/cache@v4
         with:
           path: ~/gstack
