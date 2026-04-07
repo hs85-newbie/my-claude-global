@@ -1,0 +1,29 @@
+{
+  "extraKnownMarketplaces": {
+    "claude-plugins-official": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-official"
+      }
+    }
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(pnpm *)",
+      "Bash(bun *)",
+      "Bash(paperclipai *)",
+      "Bash(openspace *)"
+    ]
+  },
+  "mcpServers": {
+    "openspace": {
+      "command": "~/.venv/openspace/bin/openspace-mcp",
+      "toolTimeout": 600,
+      "env": {
+        "OPENSPACE_WORKSPACE": "~/.openspace",
+        "OPENSPACE_HOST_SKILL_DIRS": "~/.claude/skills"
+      }
+    }
+  }
+}
