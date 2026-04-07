@@ -42,10 +42,19 @@ jobs:
             ID=$(echo "$encoded" | base64 -d | jq -r '.identifier')
             DESC=$(echo "$encoded" | base64 -d | jq -r '.description // ""')
 
-            # [레포명] 패턴 추출
+            # [레포명] 또는 [레포명:브랜치] 패턴 추출
+            # 예: [tms] 작업내용 → repo=tms, branch=main
+            # 예: [tms:dev] 작업내용 → repo=tms, branch=dev
+            BRANCH="main"
             if echo "$TITLE" | grep -qP '^\[.+?\]'; then
-              REPO=$(echo "$TITLE" | grep -oP '^\[\K[^\]]+')
+              TAG=$(echo "$TITLE" | grep -oP '^\[\K[^\]]+')
               TASK=$(echo "$TITLE" | sed 's/^\[[^]]*\]\s*//')
+              if echo "$TAG" | grep -q ':'; then
+                REPO=$(echo "$TAG" | cut -d: -f1)
+                BRANCH=$(echo "$TAG" | cut -d: -f2)
+              else
+                REPO="$TAG"
+              fi
             else
               REPO="my-claude-global"
               TASK="$TITLE"
@@ -57,12 +66,13 @@ jobs:
             fi
 
             TARGET="${OWNER}/${REPO}"
-            echo "디스패치: $ID → $TARGET — $TASK"
+            echo "디스패치: $ID → $TARGET (${BRANCH}) — $TASK"
 
             gh api "repos/${TARGET}/dispatches" \
               -f event_type=claude-task \
               -f "client_payload[task]=${TASK}" \
               -f "client_payload[issue_id]=${ID}" \
+              -f "client_payload[branch]=${BRANCH}" \
               -f "client_payload[max_turns]=20" && echo "✅ $ID 디스패치 성공" \
               || echo "⚠️ ${TARGET} dispatch 실패 (레포 확인 필요)"
           done
