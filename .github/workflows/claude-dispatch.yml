@@ -55,7 +55,7 @@ jobs:
           restore-keys: openspace-${{ github.repository }}-
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: ${{ inputs.task || github.event.client_payload.task }}
           claude_args: "--max-turns ${{ inputs.max_turns || github.event.client_payload.max_turns || '20' }}"
       - uses: actions/cache/save@v4

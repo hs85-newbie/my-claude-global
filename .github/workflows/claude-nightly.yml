@@ -47,7 +47,7 @@ jobs:
           restore-keys: openspace-${{ github.repository }}-
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             GitHub Issues에서 라벨이 'claude-todo'인 이슈를
             우선순위 순으로 처리해주세요.
