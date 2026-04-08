@@ -18,14 +18,36 @@ jobs:
           PAPERCLIP_URL: https://paperclip-production-7ed4.up.railway.app
           PAPERCLIP_COMPANY_ID: b80076db-214e-44a4-b016-427d7f0e3044
           PAPERCLIP_API_KEY: ${{ secrets.PAPERCLIP_API_KEY }}
+          AGENT_ID: 27bfd583-8296-4e15-a307-6b49c44d75a7
           GH_TOKEN: ${{ secrets.GLOBAL_SETTINGS_TOKEN }}
           OWNER: hs85-newbie
         run: |
+          # Paperclip 이슈 상태 변경 함수
+          update_issue() {
+            local ISSUE_ID="$1" STATUS="$2" COMMENT="$3"
+            local BODY="{\"status\":\"${STATUS}\""
+            if [ "$STATUS" = "in_progress" ]; then
+              BODY="${BODY},\"assigneeAgentId\":\"${AGENT_ID}\""
+            fi
+            BODY="${BODY}}"
+
+            curl -sf -X PATCH "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues/${ISSUE_ID}" \
+              -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" > /dev/null 2>&1 || true
+
+            if [ -n "$COMMENT" ]; then
+              curl -sf -X POST "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues/${ISSUE_ID}/comments" \
+                -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"body\":\"${COMMENT}\"}" > /dev/null 2>&1 || true
+            fi
+          }
+
           # Paperclip에서 todo 상태 이슈 조회
           ISSUES=$(curl -sf "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues" \
             -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null || echo "[]")
 
-          # todo 상태만 필터링
           TODO=$(echo "$ISSUES" | jq '[.[] | select(.status == "todo")]' 2>/dev/null || echo "[]")
 
           if [ "$TODO" = "[]" ] || [ -z "$TODO" ]; then
@@ -36,15 +58,13 @@ jobs:
           COUNT=$(echo "$TODO" | jq length)
           echo "대기 이슈 ${COUNT}건 발견 — 대상 레포별 디스패치"
 
-          # 이슈 제목에서 [레포명] 태그 추출하여 대상 레포로 dispatch
           echo "$TODO" | jq -r '.[] | @base64' | while read encoded; do
             TITLE=$(echo "$encoded" | base64 -d | jq -r '.title')
+            ISSUE_UUID=$(echo "$encoded" | base64 -d | jq -r '.id')
             ID=$(echo "$encoded" | base64 -d | jq -r '.identifier')
             DESC=$(echo "$encoded" | base64 -d | jq -r '.description // ""')
 
             # [레포명] 또는 [레포명:브랜치] 패턴 추출
-            # 예: [tms] 작업내용 → repo=tms, branch=main
-            # 예: [tms:dev] 작업내용 → repo=tms, branch=dev
             BRANCH="main"
             if echo "$TITLE" | grep -qP '^\[.+?\]'; then
               TAG=$(echo "$TITLE" | grep -oP '^\[\K[^\]]+')
@@ -60,7 +80,6 @@ jobs:
               TASK="$TITLE"
             fi
 
-            # 설명이 있으면 태스크에 추가
             if [ -n "$DESC" ] && [ "$DESC" != "null" ]; then
               TASK="${TASK}. 상세: ${DESC}"
             fi
@@ -68,11 +87,20 @@ jobs:
             TARGET="${OWNER}/${REPO}"
             echo "디스패치: $ID → $TARGET (${BRANCH}) — $TASK"
 
-            gh api "repos/${TARGET}/dispatches" \
+            # todo → in_progress
+            update_issue "$ISSUE_UUID" "in_progress" "🚀 GitHub Actions 디스패치 시작 → ${TARGET} (${BRANCH})"
+
+            # dispatch
+            if gh api "repos/${TARGET}/dispatches" \
               -f event_type=claude-task \
               -f "client_payload[task]=${TASK}" \
               -f "client_payload[issue_id]=${ID}" \
+              -f "client_payload[issue_uuid]=${ISSUE_UUID}" \
               -f "client_payload[branch]=${BRANCH}" \
-              -f "client_payload[max_turns]=20" && echo "✅ $ID 디스패치 성공" \
-              || echo "⚠️ ${TARGET} dispatch 실패 (레포 확인 필요)"
+              -f "client_payload[max_turns]=20"; then
+              echo "✅ $ID 디스패치 성공"
+            else
+              echo "⚠️ $ID 디스패치 실패"
+              update_issue "$ISSUE_UUID" "todo" "⚠️ 디스패치 실패: ${TARGET} 레포를 확인해주세요."
+            fi
           done
