@@ -105,7 +105,8 @@ jobs:
               COMMENTS=$(curl -sf "${PAPERCLIP_URL}/api/issues/${ISSUE_UUID}/comments" \
                 -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null || echo "[]")
 
-              APPROVED=$(echo "$COMMENTS" | jq -r '[.[] | select(.body | test("승인"))] | length' 2>/dev/null || echo 0)
+              # 코멘트 본문이 정확히 "승인"만 있는 경우만 매칭 (안내문의 "승인" 텍스트 오탐 방지)
+              APPROVED=$(echo "$COMMENTS" | jq -r '[.[] | select(.body | test("^승인$"))] | length' 2>/dev/null || echo 0)
 
               if [ "$APPROVED" -gt 0 ]; then
                 echo "✅ $ID 승인 감지 — PR 생성 + 머지 디스패치"
