@@ -13,7 +13,7 @@ jobs:
       contents: read
 
     steps:
-      - name: Paperclip 대기 이슈 확인 및 대상 레포로 디스패치
+      - name: Paperclip 이슈 처리 (todo 디스패치 + 승인 감지)
         env:
           PAPERCLIP_URL: https://paperclip-production-7ed4.up.railway.app
           PAPERCLIP_COMPANY_ID: b80076db-214e-44a4-b016-427d7f0e3044
@@ -22,49 +22,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GLOBAL_SETTINGS_TOKEN }}
           OWNER: hs85-newbie
         run: |
-          # Paperclip 이슈 상태 변경 함수
-          update_issue() {
-            local ISSUE_ID="$1" STATUS="$2" COMMENT="$3"
-            local BODY="{\"status\":\"${STATUS}\""
-            if [ "$STATUS" = "in_progress" ]; then
-              BODY="${BODY},\"assigneeAgentId\":\"${AGENT_ID}\""
-            fi
-            BODY="${BODY}}"
-
-            curl -sf -X PATCH "${PAPERCLIP_URL}/api/issues/${ISSUE_ID}" \
-              -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d "$BODY" > /dev/null 2>&1 || true
-
-            if [ -n "$COMMENT" ]; then
-              curl -sf -X POST "${PAPERCLIP_URL}/api/issues/${ISSUE_ID}/comments" \
-                -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
-                -H "Content-Type: application/json" \
-                -d "{\"body\":\"${COMMENT}\"}" > /dev/null 2>&1 || true
-            fi
-          }
-
-          # Paperclip에서 todo 상태 이슈 조회
-          ISSUES=$(curl -sf "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues" \
-            -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null || echo "[]")
-
-          TODO=$(echo "$ISSUES" | jq '[.[] | select(.status == "todo")]' 2>/dev/null || echo "[]")
-
-          if [ "$TODO" = "[]" ] || [ -z "$TODO" ]; then
-            echo "대기 중인 이슈 없음 — 스킵"
-            exit 0
-          fi
-
-          COUNT=$(echo "$TODO" | jq length)
-          echo "대기 이슈 ${COUNT}건 발견 — 대상 레포별 디스패치"
-
-          echo "$TODO" | jq -r '.[] | @base64' | while read encoded; do
-            TITLE=$(echo "$encoded" | base64 -d | jq -r '.title')
-            ISSUE_UUID=$(echo "$encoded" | base64 -d | jq -r '.id')
-            ID=$(echo "$encoded" | base64 -d | jq -r '.identifier')
-            DESC=$(echo "$encoded" | base64 -d | jq -r '.description // ""')
-
-            # [레포명] 또는 [레포명:브랜치] 패턴 추출
+          # 태그 파싱 함수
+          parse_tag() {
+            local TITLE="$1"
             BRANCH="main"
             if echo "$TITLE" | grep -qP '^\[.+?\]'; then
               TAG=$(echo "$TITLE" | grep -oP '^\[\K[^\]]+')
@@ -79,28 +39,92 @@ jobs:
               REPO="my-claude-global"
               TASK="$TITLE"
             fi
+          }
 
-            if [ -n "$DESC" ] && [ "$DESC" != "null" ]; then
-              TASK="${TASK}. 상세: ${DESC}"
-            fi
+          # 전체 이슈 조회
+          ISSUES=$(curl -sf "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues" \
+            -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null || echo "[]")
 
-            TARGET="${OWNER}/${REPO}"
-            echo "디스패치: $ID → $TARGET (${BRANCH}) — $TASK"
+          # ── 1. todo 이슈 → 디스패치 ──
+          TODO=$(echo "$ISSUES" | jq '[.[] | select(.status == "todo")]' 2>/dev/null || echo "[]")
+          TODO_COUNT=$(echo "$TODO" | jq length 2>/dev/null || echo 0)
 
-            # todo → in_progress
-            update_issue "$ISSUE_UUID" "in_progress" "🚀 GitHub Actions 디스패치 시작 → ${TARGET} (${BRANCH})"
+          if [ "$TODO_COUNT" -gt 0 ]; then
+            echo "📋 todo 이슈 ${TODO_COUNT}건 — 디스패치"
 
-            # dispatch
-            if gh api "repos/${TARGET}/dispatches" \
-              -f event_type=claude-task \
-              -f "client_payload[task]=${TASK}" \
-              -f "client_payload[issue_id]=${ID}" \
-              -f "client_payload[issue_uuid]=${ISSUE_UUID}" \
-              -f "client_payload[branch]=${BRANCH}" \
-              -f "client_payload[max_turns]=20"; then
-              echo "✅ $ID 디스패치 성공"
-            else
-              echo "⚠️ $ID 디스패치 실패"
-              update_issue "$ISSUE_UUID" "todo" "⚠️ 디스패치 실패: ${TARGET} 레포를 확인해주세요."
-            fi
-          done
+            echo "$TODO" | jq -r '.[] | @base64' | while read encoded; do
+              TITLE=$(echo "$encoded" | base64 -d | jq -r '.title')
+              ISSUE_UUID=$(echo "$encoded" | base64 -d | jq -r '.id')
+              ID=$(echo "$encoded" | base64 -d | jq -r '.identifier')
+              DESC=$(echo "$encoded" | base64 -d | jq -r '.description // ""')
+
+              parse_tag "$TITLE"
+
+              if [ -n "$DESC" ] && [ "$DESC" != "null" ]; then
+                TASK="${TASK}. 상세: ${DESC}"
+              fi
+
+              TARGET="${OWNER}/${REPO}"
+              echo "디스패치: $ID → $TARGET (${BRANCH})"
+
+              # todo → in_progress
+              curl -sf -X PATCH "${PAPERCLIP_URL}/api/issues/${ISSUE_UUID}" \
+                -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"status\":\"in_progress\",\"assigneeAgentId\":\"${AGENT_ID}\"}" > /dev/null 2>&1 || true
+
+              curl -sf -X POST "${PAPERCLIP_URL}/api/issues/${ISSUE_UUID}/comments" \
+                -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"body\":\"🚀 디스패치 시작 → ${TARGET} (${BRANCH})\"}" > /dev/null 2>&1 || true
+
+              gh api "repos/${TARGET}/dispatches" \
+                -f event_type=claude-task \
+                -f "client_payload[task]=${TASK}" \
+                -f "client_payload[issue_id]=${ID}" \
+                -f "client_payload[issue_uuid]=${ISSUE_UUID}" \
+                -f "client_payload[branch]=${BRANCH}" \
+                -f "client_payload[max_turns]=20" && echo "✅ $ID 디스패치 성공" \
+                || echo "⚠️ $ID 디스패치 실패"
+            done
+          fi
+
+          # ── 2. in_review 이슈 → 승인 코멘트 감지 ──
+          IN_REVIEW=$(echo "$ISSUES" | jq '[.[] | select(.status == "in_review")]' 2>/dev/null || echo "[]")
+          REVIEW_COUNT=$(echo "$IN_REVIEW" | jq length 2>/dev/null || echo 0)
+
+          if [ "$REVIEW_COUNT" -gt 0 ]; then
+            echo "🔍 in_review 이슈 ${REVIEW_COUNT}건 — 승인 코멘트 확인"
+
+            echo "$IN_REVIEW" | jq -r '.[] | @base64' | while read encoded; do
+              TITLE=$(echo "$encoded" | base64 -d | jq -r '.title')
+              ISSUE_UUID=$(echo "$encoded" | base64 -d | jq -r '.id')
+              ID=$(echo "$encoded" | base64 -d | jq -r '.identifier')
+
+              # 최근 코멘트에서 "승인" 확인
+              COMMENTS=$(curl -sf "${PAPERCLIP_URL}/api/issues/${ISSUE_UUID}/comments" \
+                -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null || echo "[]")
+
+              APPROVED=$(echo "$COMMENTS" | jq -r '[.[] | select(.body | test("승인"))] | length' 2>/dev/null || echo 0)
+
+              if [ "$APPROVED" -gt 0 ]; then
+                echo "✅ $ID 승인 감지 — PR 생성 + 머지 디스패치"
+
+                parse_tag "$TITLE"
+                TARGET="${OWNER}/${REPO}"
+
+                gh api "repos/${TARGET}/dispatches" \
+                  -f event_type=claude-approve \
+                  -f "client_payload[action]=approve" \
+                  -f "client_payload[issue_id]=${ID}" \
+                  -f "client_payload[issue_uuid]=${ISSUE_UUID}" \
+                  -f "client_payload[issue_title]=${TASK}" \
+                  -f "client_payload[branch]=${BRANCH}" && echo "✅ $ID 승인 디스패치 성공" \
+                  || echo "⚠️ $ID 승인 디스패치 실패"
+              fi
+            done
+          fi
+
+          if [ "$TODO_COUNT" -eq 0 ] && [ "$REVIEW_COUNT" -eq 0 ]; then
+            echo "대기 중인 이슈 없음 — 스킵"
+          fi
