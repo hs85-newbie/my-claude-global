@@ -31,13 +31,13 @@ jobs:
             fi
             BODY="${BODY}}"
 
-            curl -sf -X PATCH "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues/${ISSUE_ID}" \
+            curl -sf -X PATCH "${PAPERCLIP_URL}/api/issues/${ISSUE_ID}" \
               -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
               -H "Content-Type: application/json" \
               -d "$BODY" > /dev/null 2>&1 || true
 
             if [ -n "$COMMENT" ]; then
-              curl -sf -X POST "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues/${ISSUE_ID}/comments" \
+              curl -sf -X POST "${PAPERCLIP_URL}/api/issues/${ISSUE_ID}/comments" \
                 -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
                 -H "Content-Type: application/json" \
                 -d "{\"body\":\"${COMMENT}\"}" > /dev/null 2>&1 || true
