@@ -1,23 +1,23 @@
-name: Paperclip 일괄 정리 (수동 실행)
+name: Paperclip 일괄 정리
 
 # WHY: 폭주/사고 시 누적된 sub-이슈를 일괄 cancelled 처리하기 위한 one-off 워크플로우
 on:
   workflow_dispatch:
     inputs:
       parent_uuid:
-        description: "정리할 root parent 이슈 UUID (재귀적으로 전체 후손 찾음)"
+        description: "정리할 root parent UUID (재귀로 전체 후손)"
         required: true
         type: string
       target_status:
-        description: "변경할 상태 (cancelled 권장)"
+        description: "변경할 상태"
         default: "cancelled"
         type: string
       from_status:
-        description: "현재 상태 필터 (todo/in_progress/in_review/all)"
+        description: "필터 (todo/in_progress/in_review/all)"
         default: "todo"
         type: string
       dry_run:
-        description: "true면 실제 변경 없이 대상만 출력"
+        description: "true=대상만 출력, false=실제 변경"
         default: "true"
         type: string
 
@@ -27,7 +27,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-
     steps:
       - name: Sub-이슈 일괄 상태 변경
         env:
@@ -39,81 +38,84 @@ jobs:
           FROM_STATUS: ${{ inputs.from_status }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
+          set -e
           echo "🔍 정리 대상 조회"
           echo "  parent_uuid: ${PARENT_UUID}"
           echo "  from_status: ${FROM_STATUS}"
           echo "  target_status: ${TARGET_STATUS}"
           echo "  dry_run: ${DRY_RUN}"
-          echo ""
 
           ISSUES=$(curl -sf "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues" \
-            -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null || echo "[]")
-
+            -H "Authorization: Bearer ${PAPERCLIP_API_KEY}")
           TOTAL=$(echo "$ISSUES" | jq 'length')
           echo "전체 이슈 수: ${TOTAL}"
 
-          # WHY: 무한 루프로 손자/증손자까지 생긴 경우 대비 — 재귀적으로 후손 UUID 수집
-          # BFS 방식: PARENT_UUID로 시작 → 자식들의 자식까지 모두 수집
-          DESCENDANTS=$(echo "$ISSUES" | jq --arg root "$PARENT_UUID" '
-            [$root] as $initial |
-            reduce range(0; 20) as $i ($initial;
-              . as $current |
-              ($current + [.[] as $u | (input_filename | .)] |
-                . + [(. as $list | $ENV.ISSUES_JSON // "[]" | fromjson | .[] | select(.parentId as $p | $list | index($p)) | .id)]) | unique
-            )
-          ' 2>/dev/null || echo "[]")
+          # WHY: 무한 루프로 손자/증손자까지 생긴 경우 대비 — BFS로 후손 UUID 수집
+          echo "$ISSUES" > /tmp/issues.json
+          echo "$PARENT_UUID" > /tmp/current.txt
+          echo "$PARENT_UUID" > /tmp/all_descendants.txt
 
-          # 위 jq가 복잡해서 단순화 — bash 루프로 BFS 구현
-          CURRENT_LEVEL="$PARENT_UUID"
-          ALL_DESCENDANTS=""
-          for level in 1 2 3 4 5; do
-            NEW_LEVEL=$(echo "$ISSUES" | jq -r --argjson parents "[\"$(echo $CURRENT_LEVEL | sed 's/ /\",\"/g')\"]" \
-              '[.[] | select(.parentId as $p | $parents | index($p)) | .id] | .[]' 2>/dev/null || echo "")
-            if [ -z "$NEW_LEVEL" ]; then
-              echo "Level ${level}: 후손 없음 — 종료"
+          for level in 1 2 3 4 5 6 7 8 9 10; do
+            CURRENT=$(cat /tmp/current.txt)
+            if [ -z "$CURRENT" ]; then
+              echo "Level ${level}: 종료"
               break
             fi
-            COUNT_LEVEL=$(echo "$NEW_LEVEL" | wc -l | tr -d ' ')
-            echo "Level ${level}: ${COUNT_LEVEL}건 발견"
-            ALL_DESCENDANTS="${ALL_DESCENDANTS}
-${NEW_LEVEL}"
-            CURRENT_LEVEL=$(echo "$NEW_LEVEL" | tr '\n' ' ')
+            # 현재 레벨의 UUID들을 jq 배열로 변환
+            CURRENT_JSON=$(echo "$CURRENT" | jq -R -s 'split("\n") | map(select(. != ""))')
+            # 해당 parents의 자식 UUID 찾기
+            NEW_UUIDS=$(jq -r --argjson p "$CURRENT_JSON" '[.[] | select(.parentId as $pid | $p | index($pid)) | .id] | .[]' /tmp/issues.json)
+            COUNT=$(echo "$NEW_UUIDS" | grep -c '.' || echo 0)
+            echo "Level ${level}: ${COUNT}건"
+            if [ "$COUNT" -eq 0 ]; then
+              break
+            fi
+            echo "$NEW_UUIDS" >> /tmp/all_descendants.txt
+            echo "$NEW_UUIDS" > /tmp/current.txt
           done
 
-          # 후손 UUID 목록 정제
-          DESCENDANT_UUIDS=$(echo "$ALL_DESCENDANTS" | grep -v '^$' | sort -u)
-          DESC_COUNT=$(echo "$DESCENDANT_UUIDS" | grep -c '.' || echo 0)
+          # 자기 자신(root) 제외
+          DESCENDANTS=$(grep -v "^${PARENT_UUID}$" /tmp/all_descendants.txt | sort -u | grep -v '^$')
+          DESC_COUNT=$(echo "$DESCENDANTS" | grep -c '.' || echo 0)
           echo ""
-          echo "총 후손 이슈 수: ${DESC_COUNT}"
+          echo "📊 총 후손 수: ${DESC_COUNT}"
 
           if [ "$DESC_COUNT" -eq 0 ]; then
             echo "✅ 정리할 후손 없음"
             exit 0
           fi
 
-          # JSON 배열로 변환 후 status 필터
-          DESCENDANT_JSON=$(echo "$DESCENDANT_UUIDS" | jq -R . | jq -s .)
+          # 후손 중 status 필터
+          DESC_JSON=$(echo "$DESCENDANTS" | jq -R -s 'split("\n") | map(select(. != ""))')
 
           if [ "$FROM_STATUS" = "all" ]; then
-            TARGETS=$(echo "$ISSUES" | jq --argjson uuids "$DESCENDANT_JSON" \
-              '[.[] | select(.id as $i | $uuids | index($i)) | select(.status != "done" and .status != "cancelled")]')
+            TARGETS=$(jq --argjson uuids "$DESC_JSON" \
+              '[.[] | select(.id as $i | $uuids | index($i)) | select(.status != "done" and .status != "cancelled")]' /tmp/issues.json)
           else
-            TARGETS=$(echo "$ISSUES" | jq --argjson uuids "$DESCENDANT_JSON" --arg s "$FROM_STATUS" \
-              '[.[] | select(.id as $i | $uuids | index($i)) | select(.status == $s)]')
+            TARGETS=$(jq --argjson uuids "$DESC_JSON" --arg s "$FROM_STATUS" \
+              '[.[] | select(.id as $i | $uuids | index($i)) | select(.status == $s)]' /tmp/issues.json)
           fi
 
           COUNT=$(echo "$TARGETS" | jq 'length')
-          echo "📋 대상 ${COUNT}건"
+          echo "📋 정리 대상: ${COUNT}건"
 
           if [ "$COUNT" -eq 0 ]; then
-            echo "✅ 정리할 이슈 없음"
+            echo "✅ 대상 없음"
             exit 0
           fi
 
-          # 대상 목록 출력
-          echo "$TARGETS" | jq -r '.[] | "  - \(.identifier): \(.title)"' | head -50
-          if [ "$COUNT" -gt 50 ]; then
-            echo "  ... (${COUNT}건 중 50건만 표시)"
+          # 상태별 집계
+          echo ""
+          echo "📊 상태별 분포 (전체 후손):"
+          jq --argjson uuids "$DESC_JSON" \
+            '[.[] | select(.id as $i | $uuids | index($i))] | group_by(.status) | map({status: .[0].status, count: length})' /tmp/issues.json
+
+          # 대상 목록 출력 (최대 30건)
+          echo ""
+          echo "📝 대상 샘플 (최대 30건):"
+          echo "$TARGETS" | jq -r '.[] | "  - \(.identifier): \(.title)"' | head -30
+          if [ "$COUNT" -gt 30 ]; then
+            echo "  ... (총 ${COUNT}건)"
           fi
 
           if [ "$DRY_RUN" = "true" ]; then
@@ -126,20 +128,20 @@ ${NEW_LEVEL}"
           # 일괄 PATCH
           echo ""
           echo "🔄 상태 변경 중..."
+          echo "$TARGETS" | jq -r '.[].id' > /tmp/target_uuids.txt
           SUCCESS=0
           FAILED=0
-          echo "$TARGETS" | jq -r '.[].id' | while read uuid; do
+          while read uuid; do
+            if [ -z "$uuid" ]; then continue; fi
             if curl -sf -X PATCH "${PAPERCLIP_URL}/api/issues/${uuid}" \
               -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
               -H "Content-Type: application/json" \
               -d "{\"status\":\"${TARGET_STATUS}\"}" > /dev/null 2>&1; then
               SUCCESS=$((SUCCESS + 1))
-              echo "  ✅ ${uuid}"
             else
               FAILED=$((FAILED + 1))
-              echo "  ❌ ${uuid}"
             fi
-          done
+          done < /tmp/target_uuids.txt
 
           echo ""
-          echo "✅ 정리 완료"
+          echo "✅ 완료: 성공 ${SUCCESS} / 실패 ${FAILED}"
