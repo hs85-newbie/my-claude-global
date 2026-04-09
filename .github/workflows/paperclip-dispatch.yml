@@ -2,7 +2,7 @@ name: Paperclip → Actions 중앙 디스패치
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # 30분마다 실행
+    - cron: '*/5 * * * *'  # 5분마다 실행
   workflow_dispatch:
 
 jobs:
@@ -63,11 +63,13 @@ jobs:
               DESC=$(echo "$encoded" | base64 -d | jq -r '.description // ""')
               PARENT_ID=$(echo "$encoded" | base64 -d | jq -r '.parentId // empty')
 
-              # sub-이슈 순차 실행: 같은 parent의 다른 sub-이슈가 in_progress/in_review면 스킵
+              # WHY: 완전 순차는 너무 느리고, 완전 병렬은 merge conflict 위험
+              # 같은 parent의 sub-이슈는 최대 3개까지 동시 실행 허용
+              MAX_CONCURRENT=3
               if [ -n "$PARENT_ID" ]; then
                 SIBLING_ACTIVE=$(echo "$ISSUES" | jq -r "[.[] | select(.parentId == \"${PARENT_ID}\" and (.status == \"in_progress\" or .status == \"in_review\"))] | length" 2>/dev/null || echo 0)
-                if [ "$SIBLING_ACTIVE" -gt 0 ]; then
-                  echo "⏳ $ID — 형제 sub-이슈 진행 중, 대기"
+                if [ "$SIBLING_ACTIVE" -ge "$MAX_CONCURRENT" ]; then
+                  echo "⏳ $ID — 동시 실행 ${SIBLING_ACTIVE}/${MAX_CONCURRENT}, 대기"
                   continue
                 fi
               fi
