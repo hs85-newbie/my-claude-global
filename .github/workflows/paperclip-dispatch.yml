@@ -64,13 +64,29 @@ jobs:
               PARENT_ID=$(echo "$encoded" | base64 -d | jq -r '.parentId // empty')
 
               # WHY: 완전 순차는 너무 느리고, 완전 병렬은 merge conflict 위험
-              # 같은 parent의 sub-이슈는 최대 3개까지 동시 실행 허용
+              # 4-레이어 병렬 제어: MAX_CONCURRENT + 카테고리 그룹핑 + 예외 화이트리스트
               MAX_CONCURRENT=3
+              # 파일 독립성이 확실한 카테고리 — 카테고리 내에서도 병렬 허용
+              PARALLEL_CATEGORIES="보안|DB|알림|정리"
+
               if [ -n "$PARENT_ID" ]; then
+                # 전체 동시 실행 상한 체크
                 SIBLING_ACTIVE=$(echo "$ISSUES" | jq -r "[.[] | select(.parentId == \"${PARENT_ID}\" and (.status == \"in_progress\" or .status == \"in_review\"))] | length" 2>/dev/null || echo 0)
                 if [ "$SIBLING_ACTIVE" -ge "$MAX_CONCURRENT" ]; then
                   echo "⏳ $ID — 동시 실행 ${SIBLING_ACTIVE}/${MAX_CONCURRENT}, 대기"
                   continue
+                fi
+
+                # 카테고리 추출: "[보안] 제목" → "보안"
+                MY_CATEGORY=$(echo "$TITLE" | grep -oP '\[\K[^\]]+' | tail -1 || echo "")
+
+                # 예외 화이트리스트가 아닌 카테고리 → 같은 카테고리 형제가 활성이면 대기
+                if [ -n "$MY_CATEGORY" ] && ! echo "$MY_CATEGORY" | grep -qE "$PARALLEL_CATEGORIES"; then
+                  SAME_CAT_ACTIVE=$(echo "$ISSUES" | jq -r "[.[] | select(.parentId == \"${PARENT_ID}\" and (.status == \"in_progress\" or .status == \"in_review\") and (.title | test(\"\\\\[${MY_CATEGORY}\\\\]\")))] | length" 2>/dev/null || echo 0)
+                  if [ "$SAME_CAT_ACTIVE" -gt 0 ]; then
+                    echo "⏳ $ID — [${MY_CATEGORY}] 카테고리 형제 진행 중, 대기"
+                    continue
+                  fi
                 fi
               fi
 
