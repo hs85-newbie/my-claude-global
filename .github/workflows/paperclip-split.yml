@@ -82,10 +82,10 @@ jobs:
           REPO_NAME=$(echo "$REPO" | cut -d/ -f2)
           TAG_PREFIX="[${REPO_NAME}:${BRANCH}]"
 
-          # 기존 이슈 제목 조회 (멱등성)
+          # 기존 이슈 제목 조회 (멱등성) — cancelled/done은 제외 (active만 중복 체크)
           EXISTING=$(curl -sf "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues" \
             -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null \
-            | jq -r '.[].title' || echo "")
+            | jq -r '[.[] | select(.status == "todo" or .status == "in_progress" or .status == "in_review")] | .[].title' || echo "")
 
           IDX=1
           CREATED=0
