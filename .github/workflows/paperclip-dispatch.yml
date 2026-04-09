@@ -112,11 +112,13 @@ jobs:
                 -H "Content-Type: application/json" \
                 -d "{\"body\":\"🚀 디스패치 시작 → ${TARGET} (${BRANCH})\"}" > /dev/null 2>&1 || true
 
+              # WHY: parent_id 누락 시 sub-이슈 자동 분할 가드 우회 → 무한 루프
               gh api "repos/${TARGET}/dispatches" \
                 -f event_type=claude-task \
                 -f "client_payload[task]=${TASK}" \
                 -f "client_payload[issue_id]=${ID}" \
                 -f "client_payload[issue_uuid]=${ISSUE_UUID}" \
+                -f "client_payload[parent_id]=${PARENT_ID}" \
                 -f "client_payload[branch]=${BRANCH}" \
                 -f "client_payload[max_turns]=30" && echo "✅ $ID 디스패치 성공" \
                 || echo "⚠️ $ID 디스패치 실패"
