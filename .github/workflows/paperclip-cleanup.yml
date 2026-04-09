@@ -1,0 +1,96 @@
+name: Paperclip 일괄 정리 (수동 실행)
+
+# WHY: 폭주/사고 시 누적된 sub-이슈를 일괄 cancelled 처리하기 위한 one-off 워크플로우
+on:
+  workflow_dispatch:
+    inputs:
+      parent_uuid:
+        description: "정리할 parent 이슈 UUID"
+        required: true
+        type: string
+      target_status:
+        description: "변경할 상태 (cancelled 권장)"
+        default: "cancelled"
+        type: string
+      from_status:
+        description: "현재 상태 필터 (todo만 정리할지, 전체 미완료를 정리할지)"
+        default: "todo"
+        type: string
+      dry_run:
+        description: "true면 실제 변경 없이 대상만 출력"
+        default: "true"
+        type: string
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Sub-이슈 일괄 상태 변경
+        env:
+          PAPERCLIP_URL: https://paperclip-production-7ed4.up.railway.app
+          PAPERCLIP_COMPANY_ID: b80076db-214e-44a4-b016-427d7f0e3044
+          PAPERCLIP_API_KEY: ${{ secrets.PAPERCLIP_API_KEY }}
+          PARENT_UUID: ${{ inputs.parent_uuid }}
+          TARGET_STATUS: ${{ inputs.target_status }}
+          FROM_STATUS: ${{ inputs.from_status }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          echo "🔍 정리 대상 조회"
+          echo "  parent_uuid: ${PARENT_UUID}"
+          echo "  from_status: ${FROM_STATUS}"
+          echo "  target_status: ${TARGET_STATUS}"
+          echo "  dry_run: ${DRY_RUN}"
+          echo ""
+
+          ISSUES=$(curl -sf "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues" \
+            -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null || echo "[]")
+
+          # parent_uuid 매칭 + status 필터
+          TARGETS=$(echo "$ISSUES" | jq -r --arg p "$PARENT_UUID" --arg s "$FROM_STATUS" \
+            '[.[] | select(.parentId == $p and .status == $s)]')
+
+          COUNT=$(echo "$TARGETS" | jq 'length')
+          echo "📋 대상 ${COUNT}건"
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "✅ 정리할 이슈 없음"
+            exit 0
+          fi
+
+          # 대상 목록 출력
+          echo "$TARGETS" | jq -r '.[] | "  - \(.identifier): \(.title)"' | head -50
+          if [ "$COUNT" -gt 50 ]; then
+            echo "  ... (${COUNT}건 중 50건만 표시)"
+          fi
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo ""
+            echo "⚠️ dry_run=true — 실제 변경 안 함"
+            echo "실제 정리하려면 dry_run=false로 다시 실행"
+            exit 0
+          fi
+
+          # 일괄 PATCH
+          echo ""
+          echo "🔄 상태 변경 중..."
+          SUCCESS=0
+          FAILED=0
+          echo "$TARGETS" | jq -r '.[].id' | while read uuid; do
+            if curl -sf -X PATCH "${PAPERCLIP_URL}/api/issues/${uuid}" \
+              -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "{\"status\":\"${TARGET_STATUS}\"}" > /dev/null 2>&1; then
+              SUCCESS=$((SUCCESS + 1))
+              echo "  ✅ ${uuid}"
+            else
+              FAILED=$((FAILED + 1))
+              echo "  ❌ ${uuid}"
+            fi
+          done
+
+          echo ""
+          echo "✅ 정리 완료"
