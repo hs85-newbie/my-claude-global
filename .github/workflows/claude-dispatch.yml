@@ -53,11 +53,55 @@ jobs:
           path: ~/.openspace
           key: openspace-${{ github.repository }}-${{ github.run_id }}
           restore-keys: openspace-${{ github.repository }}-
-      - uses: anthropics/claude-code-action@v1
+      - name: Claude Code 실행
+        id: claude
+        uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: ${{ inputs.task || github.event.client_payload.task }}
-          claude_args: "--max-turns ${{ inputs.max_turns || github.event.client_payload.max_turns || '20' }}"
+          prompt: |
+            ${{ inputs.task || github.event.client_payload.task }}
+
+            ⚠️ 중요: git 명령(checkout, add, commit, push)은 절대 실행하지 마세요.
+            파일 생성/수정만 하면 워크플로우가 자동으로 커밋하고 푸시합니다.
+          claude_args: "--max-turns ${{ inputs.max_turns || github.event.client_payload.max_turns || '20' }} --dangerously-skip-permissions"
+
+      # WHY: Claude에게 git push를 위임하면 max_turns 초과/권한 문제로 실패 반복
+      - name: 변경사항 감지
+        id: changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            git status --short
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "변경사항 없음"
+          fi
+
+      - name: Git Commit & Push
+        if: steps.changes.outputs.has_changes == 'true'
+        env:
+          TASK: ${{ inputs.task || github.event.client_payload.task }}
+        run: |
+          WORK_BRANCH="claude/manual-$(date +%Y%m%d-%H%M%S)"
+          COMMIT_MSG=$(echo "$TASK" | head -c 72)
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$WORK_BRANCH"
+          git add -A
+          git commit -m "${COMMIT_MSG}"
+
+          for i in 1 2 3; do
+            if git push origin "$WORK_BRANCH" 2>&1; then
+              echo "✅ Push 성공 (시도 ${i}/3)"
+              exit 0
+            fi
+            echo "⚠️ Push 실패 (${i}/3), 재시도..."
+            sleep $((2 ** i))
+          done
+          echo "❌ Push 3회 실패"
+          exit 1
+
       - uses: actions/cache/save@v4
         if: always()
         with:
