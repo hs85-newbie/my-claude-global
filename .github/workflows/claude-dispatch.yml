@@ -81,14 +81,21 @@ jobs:
         if: steps.changes.outputs.has_changes == 'true'
         env:
           TASK: ${{ inputs.task || github.event.client_payload.task }}
+          GH_TOKEN: ${{ secrets.GLOBAL_SETTINGS_TOKEN }}
         run: |
           WORK_BRANCH="claude/manual-$(date +%Y%m%d-%H%M%S)"
           COMMIT_MSG=$(echo "$TASK" | head -c 72)
 
+          # WHY: actions/checkout 토큰은 checkout step에서만 유효, push용 별도 설정 필요
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$WORK_BRANCH"
+
+          # WHY: .claude-global은 별도 checkout된 서브레포 — 커밋 대상 제외
+          echo ".claude-global" >> .gitignore
           git add -A
+          git reset HEAD .gitignore
           git commit -m "${COMMIT_MSG}"
 
           for i in 1 2 3; do
