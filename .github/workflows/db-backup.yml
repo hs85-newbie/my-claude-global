@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: OpenSpace DB 캐시 복원
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ~/.openspace
           key: openspace-${{ github.repository }}-
