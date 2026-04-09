@@ -1,0 +1,55 @@
+name: Paperclip 이슈 상태 재설정
+
+# WHY: 단일 이슈를 특정 상태로 reset (예: in_progress → todo로 되돌려 재dispatch)
+on:
+  workflow_dispatch:
+    inputs:
+      issue_identifier:
+        description: "이슈 식별자 (예: HSD-297)"
+        required: true
+        type: string
+      target_status:
+        description: "변경할 상태"
+        default: "todo"
+        type: string
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 이슈 상태 변경
+        env:
+          PAPERCLIP_URL: https://paperclip-production-7ed4.up.railway.app
+          PAPERCLIP_COMPANY_ID: b80076db-214e-44a4-b016-427d7f0e3044
+          PAPERCLIP_API_KEY: ${{ secrets.PAPERCLIP_API_KEY }}
+          IDENTIFIER: ${{ inputs.issue_identifier }}
+          TARGET_STATUS: ${{ inputs.target_status }}
+        run: |
+          set -e
+          ISSUES=$(curl -sf "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues" \
+            -H "Authorization: Bearer ${PAPERCLIP_API_KEY}")
+
+          ISSUE=$(echo "$ISSUES" | jq -r --arg id "$IDENTIFIER" '.[] | select(.identifier == $id)')
+          if [ -z "$ISSUE" ]; then
+            echo "❌ ${IDENTIFIER} 찾을 수 없음"
+            exit 1
+          fi
+
+          UUID=$(echo "$ISSUE" | jq -r '.id')
+          CURRENT=$(echo "$ISSUE" | jq -r '.status')
+          TITLE=$(echo "$ISSUE" | jq -r '.title')
+
+          echo "📋 ${IDENTIFIER}: ${TITLE}"
+          echo "  현재 상태: ${CURRENT}"
+          echo "  변경 후: ${TARGET_STATUS}"
+
+          if curl -sf -X PATCH "${PAPERCLIP_URL}/api/issues/${UUID}" \
+            -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"${TARGET_STATUS}\"}" > /dev/null; then
+            echo "✅ ${IDENTIFIER} → ${TARGET_STATUS}"
+          else
+            echo "❌ PATCH 실패"
+            exit 1
+          fi
