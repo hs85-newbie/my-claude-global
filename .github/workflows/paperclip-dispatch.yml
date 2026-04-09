@@ -43,6 +43,16 @@ jobs:
             fi
           }
 
+          # WHY: GitHub Actions private 레포 무료 한도(2,000분/월) 보호
+          # public 레포는 매번 처리, private 레포는 매시 :00, :30 슬롯에서만 처리
+          PUBLIC_REPOS="my-claude-global"
+          MINUTE=$(date -u +%M)
+          PRIVATE_SLOT=false
+          if [ $((10#$MINUTE % 30)) -lt 5 ]; then
+            PRIVATE_SLOT=true
+          fi
+          echo "현재 분: ${MINUTE}, private 슬롯: ${PRIVATE_SLOT}"
+
           # 전체 이슈 조회
           ISSUES=$(curl -sf "${PAPERCLIP_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues" \
             -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null || echo "[]")
@@ -93,6 +103,12 @@ jobs:
               fi
 
               parse_tag "$TITLE"
+
+              # WHY: private 레포는 30분 슬롯에서만 dispatch
+              if ! echo "$PUBLIC_REPOS" | grep -qw "$REPO" && [ "$PRIVATE_SLOT" != "true" ]; then
+                echo "⏭ $ID — private 레포 ($REPO), 30분 슬롯 대기"
+                continue
+              fi
 
               if [ -n "$DESC" ] && [ "$DESC" != "null" ]; then
                 TASK="${TASK}. 상세: ${DESC}"
