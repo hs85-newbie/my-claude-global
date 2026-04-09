@@ -49,6 +49,10 @@ jobs:
           TODO=$(echo "$ISSUES" | jq '[.[] | select(.status == "todo")]' 2>/dev/null || echo "[]")
           TODO_COUNT=$(echo "$TODO" | jq length 2>/dev/null || echo 0)
 
+          # 진행 중인 이슈 확인 (sub-이슈 순차 실행용)
+          IN_PROGRESS=$(echo "$ISSUES" | jq '[.[] | select(.status == "in_progress")]' 2>/dev/null || echo "[]")
+          IN_PROGRESS_PARENTS=$(echo "$IN_PROGRESS" | jq -r '.[].parentId // empty' 2>/dev/null | sort -u)
+
           if [ "$TODO_COUNT" -gt 0 ]; then
             echo "📋 todo 이슈 ${TODO_COUNT}건 — 디스패치"
 
@@ -57,6 +61,16 @@ jobs:
               ISSUE_UUID=$(echo "$encoded" | base64 -d | jq -r '.id')
               ID=$(echo "$encoded" | base64 -d | jq -r '.identifier')
               DESC=$(echo "$encoded" | base64 -d | jq -r '.description // ""')
+              PARENT_ID=$(echo "$encoded" | base64 -d | jq -r '.parentId // empty')
+
+              # sub-이슈 순차 실행: 같은 parent의 다른 sub-이슈가 in_progress/in_review면 스킵
+              if [ -n "$PARENT_ID" ]; then
+                SIBLING_ACTIVE=$(echo "$ISSUES" | jq -r "[.[] | select(.parentId == \"${PARENT_ID}\" and (.status == \"in_progress\" or .status == \"in_review\"))] | length" 2>/dev/null || echo 0)
+                if [ "$SIBLING_ACTIVE" -gt 0 ]; then
+                  echo "⏳ $ID — 형제 sub-이슈 진행 중, 대기"
+                  continue
+                fi
+              fi
 
               parse_tag "$TITLE"
 
@@ -84,7 +98,7 @@ jobs:
                 -f "client_payload[issue_id]=${ID}" \
                 -f "client_payload[issue_uuid]=${ISSUE_UUID}" \
                 -f "client_payload[branch]=${BRANCH}" \
-                -f "client_payload[max_turns]=20" && echo "✅ $ID 디스패치 성공" \
+                -f "client_payload[max_turns]=30" && echo "✅ $ID 디스패치 성공" \
                 || echo "⚠️ $ID 디스패치 실패"
             done
           fi
