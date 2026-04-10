@@ -107,14 +107,16 @@ jobs:
               continue
             fi
 
-            # 항목의 다음 2줄(파일/설명) 추출
+            # WHY: 토큰 절약 — Claude가 ANALYSIS 파일 전체를 안 읽도록 항목 컨텍스트를 description에 인라인
+            # 항목 다음 5줄까지 추출 (파일/설명/원인 등)
             LINE_NUM=$(grep -n "$(echo "$item" | head -c 50)" /tmp/analysis.md | head -1 | cut -d: -f1)
             DETAIL=""
             if [ -n "$LINE_NUM" ]; then
-              DETAIL=$(sed -n "$((LINE_NUM+1)),$((LINE_NUM+2))p" /tmp/analysis.md | sed 's/^\s*-\s*//' | tr '\n' ' ')
+              DETAIL=$(sed -n "$((LINE_NUM+1)),$((LINE_NUM+5))p" /tmp/analysis.md | sed 's/^\s*-\s*//')
             fi
 
-            DESC="${ITEM_CLEAN}\n참조: ${ANALYSIS_PATH}\n\n${DETAIL}"
+            # 참조 표시 제거 — Claude가 ANALYSIS 파일 자체를 읽지 않도록 (token 절약)
+            DESC="${ITEM_CLEAN}\n\n${DETAIL}"
             DESC_JSON=$(echo -e "$DESC" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo "\"\"")
 
             if [ "$DRY_RUN" = "true" ]; then
