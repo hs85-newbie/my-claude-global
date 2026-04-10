@@ -69,9 +69,11 @@ jobs:
       - name: 변경사항 감지
         id: changes
         run: |
-          if [ -n "$(git status --porcelain)" ]; then
+          # WHY: .claude-global은 워크플로우가 별도 checkout한 서브레포 — false positive 방지
+          CHANGES=$(git status --porcelain | grep -v '^?? \.claude-global/$' || true)
+          if [ -n "$CHANGES" ]; then
             echo "has_changes=true" >> $GITHUB_OUTPUT
-            git status --short
+            echo "$CHANGES"
           else
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "변경사항 없음"
@@ -96,7 +98,12 @@ jobs:
           echo ".claude-global" >> .gitignore
           git add -A
           git reset HEAD .gitignore
-          git commit -m "${COMMIT_MSG}"
+
+          # WHY: commit 실패 시 정상 종료 (변경사항 없음 추정)
+          if ! git commit -m "${COMMIT_MSG}" 2>&1; then
+            echo "❌ commit 실패 — 변경사항 없음"
+            exit 0
+          fi
 
           for i in 1 2 3; do
             if git push origin "$WORK_BRANCH" 2>&1; then
