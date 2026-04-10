@@ -121,12 +121,14 @@ jobs:
                 continue
               fi
 
-              # WHY: 동일 이슈 재시도 카운터 — 같은 이슈가 N회 이상 dispatch 시도 시 자동 in_review
+              # WHY: 동일 이슈 재시도 카운터 — 최근 1시간 내 N회 이상 dispatch 시 자동 in_review
               # 2026-04-09 HSD-299/300 무한 재시도 사고 방지
+              # 1시간 윈도우: 과거 카운트가 누적되어 정상 이슈 차단되는 부작용 방지
               MAX_RETRY=5
+              CUTOFF=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)
               ATTEMPT_COUNT=$(curl -sf "${PAPERCLIP_URL}/api/issues/${ISSUE_UUID}/comments" \
                 -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null \
-                | jq -r '[.[] | select(.body | test("🚀 디스패치 시작"))] | length' 2>/dev/null || echo 0)
+                | jq -r --arg cutoff "$CUTOFF" '[.[] | select(.body | test("🚀 디스패치 시작")) | select(.createdAt > $cutoff)] | length' 2>/dev/null || echo 0)
 
               if [ "$ATTEMPT_COUNT" -ge "$MAX_RETRY" ]; then
                 echo "🚫 $ID — 재시도 ${ATTEMPT_COUNT}회 초과(${MAX_RETRY}) → 자동 in_review"
