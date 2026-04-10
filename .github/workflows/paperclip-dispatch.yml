@@ -121,6 +121,26 @@ jobs:
                 continue
               fi
 
+              # WHY: 동일 이슈 재시도 카운터 — 같은 이슈가 N회 이상 dispatch 시도 시 자동 in_review
+              # 2026-04-09 HSD-299/300 무한 재시도 사고 방지
+              MAX_RETRY=5
+              ATTEMPT_COUNT=$(curl -sf "${PAPERCLIP_URL}/api/issues/${ISSUE_UUID}/comments" \
+                -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" 2>/dev/null \
+                | jq -r '[.[] | select(.body | test("🚀 디스패치 시작"))] | length' 2>/dev/null || echo 0)
+
+              if [ "$ATTEMPT_COUNT" -ge "$MAX_RETRY" ]; then
+                echo "🚫 $ID — 재시도 ${ATTEMPT_COUNT}회 초과(${MAX_RETRY}) → 자동 in_review"
+                curl -sf -X PATCH "${PAPERCLIP_URL}/api/issues/${ISSUE_UUID}" \
+                  -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
+                  -H "Content-Type: application/json" \
+                  -d "{\"status\":\"in_review\"}" > /dev/null 2>&1 || true
+                curl -sf -X POST "${PAPERCLIP_URL}/api/issues/${ISSUE_UUID}/comments" \
+                  -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
+                  -H "Content-Type: application/json" \
+                  -d "{\"body\":\"🚫 재시도 ${ATTEMPT_COUNT}회 초과 — 자동 in_review (수동 검토 필요)\"}" > /dev/null 2>&1 || true
+                continue
+              fi
+
               if [ -n "$DESC" ] && [ "$DESC" != "null" ]; then
                 TASK="${TASK}. 상세: ${DESC}"
               fi
