@@ -63,7 +63,7 @@ jobs:
 
             ⚠️ 중요: git 명령(checkout, add, commit, push)은 절대 실행하지 마세요.
             파일 생성/수정만 하면 워크플로우가 자동으로 커밋하고 푸시합니다.
-          claude_args: "--max-turns ${{ inputs.max_turns || github.event.client_payload.max_turns || '20' }} --dangerously-skip-permissions"
+          claude_args: "--max-turns ${{ inputs.max_turns || github.event.client_payload.max_turns || '20' }} --model claude-sonnet-4-6 --dangerously-skip-permissions"
 
       # WHY: Claude에게 git push를 위임하면 max_turns 초과/권한 문제로 실패 반복
       - name: 변경사항 감지
