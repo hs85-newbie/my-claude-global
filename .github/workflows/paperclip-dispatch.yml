@@ -1,10 +1,9 @@
 name: Paperclip → Actions 중앙 디스패치
 
 on:
-  # WHY: 2026-04-09 sub-이슈 폭주 사태로 비활성화 (282건 누적, 빌링 한도 초과)
-  # 재활성화 전 무한 루프 차단 + 폭주 감지 + 빌링 무료 한도 검증 필수
-  # schedule:
-  #   - cron: '*/5 * * * *'
+  # 2026-04-13 재활성화 — 6-레이어 가드 + 재시도 카운터 + 모델 분기 검증 완료
+  schedule:
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
