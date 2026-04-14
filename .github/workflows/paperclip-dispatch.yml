@@ -167,8 +167,7 @@ jobs:
                 -f "client_payload[issue_id]=${ID}" \
                 -f "client_payload[issue_uuid]=${ISSUE_UUID}" \
                 -f "client_payload[parent_id]=${PARENT_ID}" \
-                -f "client_payload[branch]=${BRANCH}" \
-                -f "client_payload[max_turns]=30" && echo "✅ $ID 디스패치 성공" \
+                -f "client_payload[branch]=${BRANCH}" && echo "✅ $ID 디스패치 성공" \
                 || echo "⚠️ $ID 디스패치 실패"
             done
           fi
