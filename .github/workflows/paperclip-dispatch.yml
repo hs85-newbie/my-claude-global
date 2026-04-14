@@ -44,7 +44,7 @@ jobs:
 
           # WHY: GitHub Actions private 레포 무료 한도(2,000분/월) 보호
           # public 레포는 매번 처리, private 레포는 매시 :00, :30 슬롯에서만 처리
-          PUBLIC_REPOS="my-claude-global tms"
+          PUBLIC_REPOS="my-claude-global tms macromalt"
           MINUTE=$(date -u +%M)
           PRIVATE_SLOT=false
           if [ $((10#$MINUTE % 30)) -lt 5 ]; then
