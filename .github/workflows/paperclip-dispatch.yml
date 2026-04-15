@@ -67,6 +67,19 @@ jobs:
             exit 0
           fi
 
+          # WHY: Claude Code rate limit 방지 — 일일 dispatch 상한
+          # in_progress + done + in_review 중 오늘 dispatch된 건수로 추정
+          MAX_DAILY=20
+          TODAY=$(date -u +%Y-%m-%d)
+          TODAY_DISPATCHED=$(echo "$ISSUES" | jq --arg today "$TODAY" \
+            '[.[] | select(.updatedAt != null and (.updatedAt | startswith($today)) and (.status == "in_progress" or .status == "done" or .status == "in_review"))] | length' 2>/dev/null || echo 0)
+
+          if [ "$TODAY_DISPATCHED" -ge "$MAX_DAILY" ]; then
+            echo "🚫 일일 dispatch 상한 ${TODAY_DISPATCHED}/${MAX_DAILY}건 — 내일 재개"
+            exit 0
+          fi
+          echo "📊 오늘 dispatch: ${TODAY_DISPATCHED}/${MAX_DAILY}"
+
           # ── 1. todo 이슈 → 디스패치 ──
           TODO=$(echo "$ISSUES" | jq '[.[] | select(.status == "todo")]' 2>/dev/null || echo "[]")
           TODO_COUNT=$(echo "$TODO" | jq length 2>/dev/null || echo 0)
