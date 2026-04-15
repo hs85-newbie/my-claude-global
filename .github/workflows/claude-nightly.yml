@@ -30,7 +30,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/gstack
           key: gstack-v1-${{ runner.os }}
@@ -40,7 +40,7 @@ jobs:
             git clone https://github.com/garrytan/gstack.git ~/gstack
           fi
           cd ~/gstack && ./setup --host claude
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.openspace
           key: openspace-${{ github.repository }}-${{ github.run_id }}
@@ -55,7 +55,7 @@ jobs:
             완료된 이슈에는 'claude-done' 라벨을 추가해주세요.
             CLAUDE.md의 모든 규칙을 준수해주세요.
           claude_args: "--max-turns 30"
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v5
         if: always()
         with:
           path: ~/.openspace
